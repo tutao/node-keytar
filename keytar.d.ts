@@ -49,3 +49,8 @@ export declare function findPassword(service: string): Promise<string | null>;
  * @returns A promise for the array of found credentials.
  */
 export declare function findCredentials(service: string): Promise<Array<{ account: string, password: string}>>;
+
+/**
+ * used as an error msg in keytar_posix.cc to signal that the user cancelled secret unlock
+ */
+export declare const CANCELLED: string;

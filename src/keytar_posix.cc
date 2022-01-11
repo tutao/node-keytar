@@ -68,23 +68,37 @@ KEYTAR_OP_RESULT GetPassword(const std::string& service,
     &error          // place for errors to be reported
   );
 
-  // something went wrong
+  g_hash_table_unref(search_attrs);
+
   if (error != NULL) {
     *errStr = std::string(error->message);
     g_error_free(error);
+    g_list_free_full(items, g_object_unref);
     return FAIL_ERROR;
   }
 
-  // there were no matching secrets
-  if(!g_list_length(items)) {
+  // there was not exactly one matching secret, which is treated as password not found.
+  if (g_list_length(items) != 1) {
+    g_list_free_full(items, g_object_unref);
     return FAIL_NONFATAL;
   }
 
-  SecretItem* item = (SecretItem*) g_list_first(items)->data;
+  // SecretItem inherits from GObject
+  GList* first = g_list_first(items);
+  items = g_list_remove_link(items, first);
+  // this will not free the memory pointed to by the elements' data field.
+  // they are managed by the secret service instance inside of its item collections
+  // hash table.
+  g_list_free_full(items, g_object_unref);
+
+  SecretItem* item = (SecretItem*) first->data;
+  // free the list, not the data
+  g_list_free(first);
 
   // user should have unlocked the item, but didn't.
   // treated as deliberate cancellation
-  if(secret_item_get_locked(item)) {
+  if (secret_item_get_locked(item)) {
+    g_object_unref(item);
     // stringly typed errors :(
     *errStr = std::string("user_cancellation");
     return FAIL_ERROR;
@@ -93,7 +107,8 @@ KEYTAR_OP_RESULT GetPassword(const std::string& service,
   SecretValue* val = secret_item_get_secret(item);
 
   // if val is locked or not loaded (both should be impossible)
-  if(val == NULL) {
+  if (val == NULL) {
+    g_object_unref(item);
     return FAIL_NONFATAL;
   }
 
@@ -105,13 +120,15 @@ KEYTAR_OP_RESULT GetPassword(const std::string& service,
   // might have been overwritten by someone else.
   // treated as if the password was not set
   if (raw_password == NULL) {
+    g_object_unref(item);
+    secret_value_unref(val);
     return FAIL_NONFATAL;
   }
 
   // std::string assignment overload will do the work of converting c string to std::string (copying)
   *password = raw_password;
   secret_value_unref(val);
-  g_hash_table_unref(search_attrs);
+  g_object_unref(item);
   return SUCCESS;
 }
 
