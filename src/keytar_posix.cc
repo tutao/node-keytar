@@ -52,25 +52,66 @@ KEYTAR_OP_RESULT GetPassword(const std::string& service,
                              std::string* errStr) {
   GError* error = NULL;
 
-  gchar* raw_password = secret_password_lookup_sync(
-    &schema,                            // The schema.
-    NULL,                               // Cancellable. (unneeded)
-    &error,                             // Reference to the error.
-    "service", service.c_str(),
-    "account", account.c_str(),
-    NULL);                              // End of arguments.
+  GHashTable* search_attrs = g_hash_table_new(g_str_hash, g_str_equal);
+  g_hash_table_insert(search_attrs, (void*)"account", (void*)account.c_str());
+  g_hash_table_insert(search_attrs, (void*)"service", (void*)service.c_str());
 
+  // search all items for matching secrets, prompting to unlock any locked items before returning.
+  // any items that are found are also loaded right away so secret_item_get_secret can return something.
+  SecretSearchFlags flags = (SecretSearchFlags)(SECRET_SEARCH_ALL | SECRET_SEARCH_UNLOCK | SECRET_SEARCH_LOAD_SECRETS);
+  GList* items = secret_service_search_sync(
+    NULL,           // secret service instance. will be filled with default instance.
+    &schema,        // the schema of the attrs of the item
+    search_attrs,   // the values of the attrs
+    flags,          // SecretSearchFlags
+    NULL,           // Cancellation object (only works for cancelling this call, not for signaling user cancellation)
+    &error          // place for errors to be reported
+  );
+
+  // something went wrong
   if (error != NULL) {
     *errStr = std::string(error->message);
     g_error_free(error);
     return FAIL_ERROR;
   }
 
-  if (raw_password == NULL)
+  // there were no matching secrets
+  if(!g_list_length(items)) {
     return FAIL_NONFATAL;
+  }
 
+  SecretItem* item = (SecretItem*) g_list_first(items)->data;
+
+  // user should have unlocked the item, but didn't.
+  // treated as deliberate cancellation
+  if(secret_item_get_locked(item)) {
+    // stringly typed errors :(
+    *errStr = std::string("user_cancellation");
+    return FAIL_ERROR;
+  }
+
+  SecretValue* val = secret_item_get_secret(item);
+
+  // if val is locked or not loaded (both should be impossible)
+  if(val == NULL) {
+    return FAIL_NONFATAL;
+  }
+
+  // just a pointer to the secret value's internal data
+  const gchar* raw_password = secret_value_get_text(val);
+
+  // may happen if the password type is not text/plain
+  // passwords set by us are always text/plain, but it
+  // might have been overwritten by someone else.
+  // treated as if the password was not set
+  if (raw_password == NULL) {
+    return FAIL_NONFATAL;
+  }
+
+  // std::string assignment overload will do the work of converting c string to std::string (copying)
   *password = raw_password;
-  secret_password_free(raw_password);
+  secret_value_unref(val);
+  g_hash_table_unref(search_attrs);
   return SUCCESS;
 }
 
