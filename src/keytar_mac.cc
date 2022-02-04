@@ -126,6 +126,9 @@ KEYTAR_OP_RESULT GetPassword(const std::string& service,
 
   if (status == errSecItemNotFound) {
     return FAIL_NONFATAL;
+  } else if (status == errSecUserCanceled) {
+    *error = std::string("user_cancellation");
+    return FAIL_ERROR;
   } else if (status != errSecSuccess) {
     *error = errorStatusToString(status);
     return FAIL_ERROR;
