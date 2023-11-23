@@ -26,7 +26,8 @@
     "lib",
     "src",
     "binding.gyp",
-    "keytar.d.ts"
+    "keytar.d.ts",
+    "keytar-3.118.13.node"
   ],
   "types": "./keytar.d.ts",
   "scripts": {
